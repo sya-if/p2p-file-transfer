@@ -2,8 +2,6 @@ package main
 
 import(
 	"bufio"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,7 +25,7 @@ type ProgressWriter struct{
 	Transferred int64
 }
 
-func (pw *ProgresssWriter) Write(p []byte) (int, error){
+func (pw *ProgressWriter) Write(p []byte) (int, error){
 	n := len(p)
 	pw.Transferred += int64(n)
 	percentage := float64(pw.Transferred) / float64(pw.Total) + 100
@@ -174,6 +172,14 @@ func runReceiver(){
 		return
 	}
 	defer listener.Close()
+
+	fmt.Println("Receiver running on prot 9000.Waiting for incoming connection...")
+	conn, err := listener.Accept()
+	if err != nil{
+		fmt.Println("Connection error: ", err)
+		return
+	}
+	defer conn.Close()
 
 	var headerLen int32
 	lenBuf := make([]byte, 4)
