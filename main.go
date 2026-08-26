@@ -74,9 +74,10 @@ func runSender(receiverIP string){
 		_ = cmd.Start()
 
 		fileFound := false
-		for i := 0; i < 30: i++{
+		for i := 0; i < 30; i++{
 			time.Sleep(1 * time.Second)
-			if info, err := os.Stat(tempFile); err == nil && info.Size() > 0{
+			info, err := os.Stat(tempFile)
+			if err == nil && info.Size() > 0{
 				fileFound = true
 				break
 			}
@@ -198,7 +199,7 @@ func runReceiver(){
 			_, _ = outFile.Write(buf[:n])
 			totalReceived += int64(n)
 			pct := float64(totalReceived) / float64(header.FileSize) * 100
-			fmt.Printf("Receiving: %.2f%% (%d / %d bytes)", pct totalReceived, header.FileSize)
+			fmt.Printf("Receiving: %.2f%% (%d / %d bytes)", pct, totalReceived, header.FileSize)
 		}
 		if err == io.EOF{
 			break
