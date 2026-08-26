@@ -2,6 +2,8 @@ package main
 
 import(
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,8 +18,9 @@ import(
 )
 
 type FileHeader struct{
-	FileName string `json:"file_name"`
-	FileSize int64 `json:"file_size"`
+	FileName 	string 	`json:"file_name"`
+	FileSize 	int64 	`json:"file_size"`
+	Hash 		string 	`json:"hash"`
 }
 
 type ProgressWriter struct{
@@ -48,10 +51,7 @@ func main(){
 
 	switch choice{
 	case "1":
-		fmt.Print("Enter Receiver IP Address: ")
-		ip, _ := reader.ReadString('\n')
-		ip = strings.TrimSpace(ip)
-		runSender(ip)
+		runSender()
 	case "2":
 		runReceiver()
 	default:
@@ -59,9 +59,58 @@ func main(){
 	}
 }
 
+// Windows File Picker
+func getWindowsFilePath() string{
+	psScript := `
+	Add-Type -AssemblyName System/Windows.Forms
+	$FileBrowser = New-Object System.Windows.Forms.OpenFileDialog
+	$FileBrowser.Title = "Select a File to Send"
+	$FileBrowser.ShowDialog() | Out-Null
+	Write-Host $FileBrowser.FileName
+	`
+	cmd := exec.Command("powershell", "-Command", psScript)
+	output, err := cmd.Output()
+	if err != nil{
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// UDP Discovery for finding receiver
+func discoveryReceiverIP() (string, error){
+	fmt.Println("Searching for receiver on local Wifi network...")
+	pc, err := net.ListenPacket("udp4", ":9999")
+	if err != nil{
+		return "", err
+	}
+	defer pc.Close()
+
+	_ = pc.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 1024)
+
+	for{
+		n, addr, err := pc.ReadFrom(buf)
+		if err != nil{
+			return "", fmt.Errorf("Receiver not found on network")
+		}
+		if string(buf[:n]) == "P2P_RECEIVER_HERE"{
+			ip, _, _ := net.SplitHostPort(addr.String())
+			return ip, nil
+		}
+	}
+}
+
 // Sender Function
-func runSender(receiverIP string){
+func runSender(){
+	receiverIP, err := discoveryReceiverIP()
+	if err != nil{
+		fmt.Println("Auto-discovery failed: ", err)
+		return
+	}
+	fmt.Printf("Discovered Receiver at IP: %s\n", receiverIP)
+	
 	var filePath string
+
 	// If running on Termux
 	if runtime.GOOS == "android" || os.Getenv("TERMUX_VERSION") != ""{
 		tempFile := "picked_mobile_file.dat"
@@ -88,8 +137,14 @@ func runSender(receiverIP string){
 
 		filePath = tempFile
 		defer os.Remove(tempFile)
+	}else if runtime.GOOS =="windows"{
+		fmt.Println("Opening File Picker...")
+		filePath = getWindowsFilePath()
+		if filePath == ""{
+			fmt.Println("No file selected.")
+			return
+		}
 	} else{
-		// If running on desktop
 		fmt.Print("Enter path of the local file to send: ")
 		reader := bufio.NewReader(os.Stdin)
 		inputPath, _ := reader.ReadString('\n')
@@ -104,6 +159,13 @@ func runSender(receiverIP string){
 	defer file.Close()
 	
 	fileInfo, _ := file.Stat()
+
+	// Calculate SHA-256
+	fmt.Println("Calculating file checksun (SHA-256)...")
+	hasher := sha256.New()
+	_, _ = io.Copy(hasher, file)
+	fileHash := hex.EncodeToString(hasher.Sum(nil))
+	_, _ = file.Seek(0, 0)
 
 	//Detect the type of extension
 	buffer := make([]byte, 512)
@@ -142,7 +204,11 @@ func runSender(receiverIP string){
 	}
 	defer conn.Close()
 
-	header := FileHeader{FileName: sendFileName, FileSize: fileInfo.Size()}
+	header := FileHeader{
+		FileName: sendFileName,
+		FileSize: fileInfo.Size(),
+		Hash: fileHash,
+	}
 	headerData, _ := json.Marshal(header)
 
 	headerLen := int32(len(headerData))
@@ -156,6 +222,7 @@ func runSender(receiverIP string){
 
 	pw := &ProgressWriter{Total: fileInfo.Size()}
 	tee := io.TeeReader(file, pw)
+
 	_, err = io.Copy(conn, tee)
 	if err != nil{
 		fmt.Println("\n Error sending file: ", err)
@@ -164,8 +231,33 @@ func runSender(receiverIP string){
 	fmt.Println("\n Success! File transferred completely.")
 }
 
+//Broadcast presence for auto-discovery
+func startUDPBroadcast(stopChan chan bool){
+	broadcastAddr, _ := net.ResolveUDPAddr("udp4", "255.255.255.255:9999")
+	conn, err := net.DialUDP("udp4", nil, broadcastAddr)
+	if err != nil{
+		return
+	}
+	defer conn.Close()
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for{
+		select{
+		case <-stopChan:
+			return
+		case <-ticker.C:
+			_, _ = conn.Write([]byte("P2P_RECEIVER_HERE"))
+		}
+	}
+}
+
 // Receiver Function
 func runReceiver(){
+	stopBroadcast := make(chan bool)
+	go startUDPBroadcast(stopBroadcast)
+	
 	listener, err := net.Listen("tcp", "0.0.0.0:9000")
 	if err != nil{
 		fmt.Println("Error starting listener: ", err)
@@ -175,6 +267,8 @@ func runReceiver(){
 
 	fmt.Println("Receiver running on prot 9000.Waiting for incoming connection...")
 	conn, err := listener.Accept()
+	stopBroadcast <- true
+	
 	if err != nil{
 		fmt.Println("Connection error: ", err)
 		return
@@ -195,7 +289,7 @@ func runReceiver(){
 	fmt.Printf("Receiving '%s' (%d bytes)...\n", header.FileName, header.FileSize)
 
 	outFile, _ := os.Create(header.FileName)
-	defer outFile.Close()
+	
 	buf := make([]byte, 32*1024)
 	var totalReceived int64
 
@@ -211,6 +305,20 @@ func runReceiver(){
 			break
 		}
 	}
-	fmt.Println("\n File saved as: ", header.FileName)
+	outFile.Close()
+
+	fmt.Println("\n Verifiying checksum integrity...")
+	savedFile, _ := os.Open(header.FileName)
+	hasher := sha256.New()
+	_, _ = io.Copy(hasher, savedFile)
+	savedFile.Close()
+
+	receivedHash := hex.EncodeToString(hasher.Sum(nil))
+
+	if receivedHash == header.Hash{
+		fmt.Println("Checksum verified! File is 100% intact.")
+	}else{
+		fmt.Println("Checksum mismatch! Transferred file may be corrupted.")
+	}
 }
 
