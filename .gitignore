@@ -1,2 +1,3 @@
-*.bin
-*.txt
+*.exe
+p2p-transfer-*
+picked_mobile_file.dat
