@@ -1,7 +1,7 @@
 ## Installation & Usage
 
 ### Option 1: Download Pre-built Binary (Recommended)
-Download the latest `p2p-transfer-windows.exe` from the [Releases page](https://github.com/YOUR_USERNAME/YOUR_REPO/releases).
+Download the latest `p2p-transfer-windows.exe` from the [Releases page](https://github.com/sya-if/p2p-file-transfer/releases).
 
 ### Option 2: Build from Source
 If you have Go installed, clone this repo and build the binary:
