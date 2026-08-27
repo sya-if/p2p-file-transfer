@@ -14,5 +14,8 @@ cd YOUR_REPO
 # Build for Windows (PowerShell)
 $env:GOOS="windows"; $env:GOARCH="amd64"; go build -o p2p-transfer-windows.exe main.go
 
+# Build for Android (Termux)
+$env:GOOS="android"; $env:GOARCH="arm64"; go build -o p2p-transfer-android main.go
+
 # Run the app
 .\p2p-transfer-windows.exe
