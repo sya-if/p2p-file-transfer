@@ -16,6 +16,8 @@ $env:GOOS="windows"; $env:GOARCH="amd64"; go build -o p2p-transfer-windows.exe m
 
 # Build for Android (Termux)
 $env:GOOS="android"; $env:GOARCH="arm64"; go build -o p2p-transfer-android main.go
+cp /sdcard/Download/p2p-transfer-android ~/
+cd ~
 
 # Run the app
 .\p2p-transfer-windows.exe
